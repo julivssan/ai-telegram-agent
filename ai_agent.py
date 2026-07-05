@@ -337,8 +337,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     response = await ask_ai(user_id, text)
-    await update.message.reply_text(response, parse_mode="Markdown")
-
+    await update.message.reply_text(response)
 # ═══════════════════════════════════════════════════════════════
 # ЗАПУСК
 # ═══════════════════════════════════════════════════════════════
