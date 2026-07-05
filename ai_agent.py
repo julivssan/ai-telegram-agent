@@ -1,5 +1,5 @@
 """
-🤖 AI АГЕНТ ДЛЯ TELEGRAM
+🤖 AI АГЕНТ ДЛЯ TELEGRAM — с OpenRouter
 Память | AI-ответы | Заметки | 24/7
 """
 
@@ -17,16 +17,11 @@ from telegram.ext import (
 )
 
 # ═══════════════════════════════════════════════════════════════
-# НАСТРОЙКИ
+# НАСТРОЙКИ — КЛЮЧИ ЧИТАЮТСЯ ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ RAILWAY
 # ═══════════════════════════════════════════════════════════════
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "ТВОЙ_ТОКЕН_ОТ_BOTFATHER")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-
-DEFAULT_PROVIDER = "groq"
-GROQ_MODEL = "llama-3.1-8b-instant"
-GEMINI_MODEL = "gemini-1.5-flash"
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
 DB_PATH = "agent_memory.db"
 
@@ -61,7 +56,7 @@ def init_db():
     c.execute('''
         CREATE TABLE IF NOT EXISTS user_settings (
             user_id INTEGER PRIMARY KEY,
-            text_provider TEXT DEFAULT 'groq',
+            text_provider TEXT DEFAULT 'openrouter',
             personality TEXT DEFAULT 'friendly',
             memory_enabled INTEGER DEFAULT 1
         )
@@ -119,7 +114,7 @@ def get_user_settings(user_id: int) -> Dict:
     if not row:
         c.execute("INSERT INTO user_settings (user_id) VALUES (?)", (user_id,))
         conn.commit()
-        row = (user_id, 'groq', 'friendly', 1)
+        row = (user_id, 'openrouter', 'friendly', 1)
     
     conn.close()
     return {
@@ -163,20 +158,23 @@ def get_notes(user_id: int) -> List[Dict]:
     return [{"id": r[0], "title": r[1], "content": r[2], "created": r[3]} for r in rows]
 
 # ═══════════════════════════════════════════════════════════════
-# AI ПРОВАЙДЕРЫ
+# AI — OPENROUTER
 # ═══════════════════════════════════════════════════════════════
 
-async def ask_groq(messages: List[Dict], temperature: float = 0.7) -> str:
-    if not GROQ_API_KEY:
-        return "❌ GROQ_API_KEY не настроен"
+async def ask_openrouter(messages: List[Dict], temperature: float = 0.7) -> str:
+    """OpenRouter API — работает из любой страны, бесплатные модели"""
+    if not OPENROUTER_API_KEY:
+        return "❌ OPENROUTER_API_KEY не настроен. Добавь его в Variables на Railway."
     
-    url = "https://api.groq.com/openai/v1/chat/completions"
+    url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://ai-telegram-agent.railway.app",
+        "X-Title": "AI Telegram Agent"
     }
     payload = {
-        "model": GROQ_MODEL,
+        "model": "meta-llama/llama-3.1-8b-instruct:free",
         "messages": messages,
         "temperature": temperature,
         "max_tokens": 2048
@@ -185,44 +183,17 @@ async def ask_groq(messages: List[Dict], temperature: float = 0.7) -> str:
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload, headers=headers) as resp:
             if resp.status != 200:
-                return f"❌ Ошибка Groq: {await resp.text()}"
-            data = await resp.json()
-            return data["choices"][0]["message"]["content"]
-
-async def ask_gemini(messages: List[Dict], temperature: float = 0.7) -> str:
-    if not GEMINI_API_KEY:
-        return "❌ GEMINI_API_KEY не настроен"
-    
-    contents = []
-    for msg in messages:
-        role = "user" if msg["role"] == "user" else "model"
-        contents.append({
-            "role": role,
-            "parts": [{"text": msg["content"]}]
-        })
-    
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    payload = {
-        "contents": contents,
-        "generationConfig": {
-            "temperature": temperature,
-            "maxOutputTokens": 2048
-        }
-    }
-    
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as resp:
-            if resp.status != 200:
-                return f"❌ Ошибка Gemini: {await resp.text()}"
+                error = await resp.text()
+                return f"❌ Ошибка OpenRouter ({resp.status}): {error[:300]}"
             data = await resp.json()
             try:
-                return data["candidates"][0]["content"]["parts"][0]["text"]
+                return data["choices"][0]["message"]["content"]
             except (KeyError, IndexError):
-                return "❌ Не удалось получить ответ от Gemini"
+                return f"❌ Неожиданный ответ: {str(data)[:300]}"
 
 async def ask_ai(user_id: int, prompt: str, system_prompt: str = None) -> str:
+    """Главная функция AI — использует OpenRouter"""
     settings = get_user_settings(user_id)
-    provider = settings["text_provider"]
     
     messages = []
     
@@ -235,10 +206,10 @@ async def ask_ai(user_id: int, prompt: str, system_prompt: str = None) -> str:
             "creative": "Ты креативный помощник. Используй воображение и нестандартные подходы.",
             "concise": "Ты лаконичный ассистент. Давай короткие, по существу ответы."
         }
-        personality = personalities.get(settings["personality"], personalities["friendly"])
+        personality = personalities.get(settings.get("personality", "friendly"), personalities["friendly"])
         messages.append({"role": "system", "content": personality})
     
-    if settings["memory_enabled"]:
+    if settings.get("memory_enabled", True):
         memory = get_memory(user_id, limit=8)
         for msg in memory:
             messages.append({"role": msg["role"], "content": msg["content"]})
@@ -246,14 +217,7 @@ async def ask_ai(user_id: int, prompt: str, system_prompt: str = None) -> str:
     messages.append({"role": "user", "content": prompt})
     
     try:
-        if provider == "groq":
-            response = await ask_groq(messages)
-            if response.startswith("❌"):
-                response = await ask_gemini(messages)
-        else:
-            response = await ask_gemini(messages)
-            if response.startswith("❌"):
-                response = await ask_groq(messages)
+        response = await ask_openrouter(messages)
     except Exception as e:
         response = f"❌ Ошибка: {str(e)}"
     
@@ -291,7 +255,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 `/notes` — Список заметок
 `/clear` — Очистить память
 `/settings` — Настройки
-`/provider <groq|gemini>` — Сменить AI-провайдер
+
+Просто напиши мне — я отвечу через AI!
 """
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
@@ -332,7 +297,6 @@ async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     settings = get_user_settings(user_id)
     
     keyboard = [
-        [InlineKeyboardButton("🤖 Провайдер: " + settings["text_provider"].upper(), callback_data="switch_provider")],
         [InlineKeyboardButton("🎭 Персонаж: " + settings["personality"], callback_data="personality")],
         [InlineKeyboardButton("🧠 Память: " + ("Вкл" if settings["memory_enabled"] else "Выкл"), callback_data="toggle_memory")],
     ]
@@ -343,29 +307,12 @@ async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-async def provider_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    provider = context.args[0].lower() if context.args else None
-    
-    if provider not in ["groq", "gemini"]:
-        await update.message.reply_text("❌ Доступны: `groq`, `gemini`")
-        return
-    
-    update_settings(user_id, text_provider=provider)
-    await update.message.reply_text(f"✅ Провайдер: **{provider.upper()}**", parse_mode="Markdown")
-
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = update.effective_user.id
     await query.answer()
     
-    if query.data == "switch_provider":
-        settings = get_user_settings(user_id)
-        new_provider = "gemini" if settings["text_provider"] == "groq" else "groq"
-        update_settings(user_id, text_provider=new_provider)
-        await query.edit_message_text(f"✅ Провайдер: **{new_provider.upper()}**", parse_mode="Markdown")
-    
-    elif query.data == "toggle_memory":
+    if query.data == "toggle_memory":
         settings = get_user_settings(user_id)
         new_state = 0 if settings["memory_enabled"] else 1
         update_settings(user_id, memory_enabled=new_state)
@@ -397,6 +344,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ═══════════════════════════════════════════════════════════════
 
 def main():
+    if not TELEGRAM_TOKEN:
+        print("❌ TELEGRAM_TOKEN не настроен! Добавь его в Variables на Railway.")
+        return
+    
     init_db()
     
     application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -407,7 +358,6 @@ def main():
     application.add_handler(CommandHandler("notes", notes_cmd))
     application.add_handler(CommandHandler("clear", clear_cmd))
     application.add_handler(CommandHandler("settings", settings_cmd))
-    application.add_handler(CommandHandler("provider", provider_cmd))
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
