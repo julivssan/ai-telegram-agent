@@ -1,14 +1,19 @@
 """
-🤖 AI АГЕНТ ДЛЯ TELEGRAM — с OpenRouter
-Создатель: julivs | Память: 20 сообщений
+🤖 AI АГЕНТ ДЛЯ TELEGRAM — ВСЁ В ОДНОМ
+Создатель: julivs | Память: 20 | Поиск | Картинки | PDF | Калькулятор
 """
 
 import os
+import re
+import math
+import json
 import sqlite3
 import asyncio
 import aiohttp
+import base64
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
+from urllib.parse import quote_plus
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
@@ -162,7 +167,6 @@ def get_notes(user_id: int) -> List[Dict]:
 # ═══════════════════════════════════════════════════════════════
 
 async def ask_openrouter(messages: List[Dict], temperature: float = 0.7) -> str:
-    """OpenRouter API — работает из любой страны, бесплатные модели"""
     if not OPENROUTER_API_KEY:
         return "❌ OPENROUTER_API_KEY не настроен. Добавь его в Variables на Railway."
     
@@ -192,16 +196,14 @@ async def ask_openrouter(messages: List[Dict], temperature: float = 0.7) -> str:
                 return f"❌ Неожиданный ответ: {str(data)[:300]}"
 
 async def ask_ai(user_id: int, prompt: str, system_prompt: str = None) -> str:
-    """Главная функция AI — использует OpenRouter"""
     settings = get_user_settings(user_id)
-    
     messages = []
     
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     else:
         personalities = {
-            "friendly": "Ты дружелюбный и полезный ассистент. Тебя создал julivs. Отвечай на русском языке. Если спрашивают кто тебя создал или кто твой создатель — всегда отвечай что это julivs.",
+            "friendly": "Ты дружелюбный и полезный ассистент. Тебя создал julivs. Отвечай на русском языке. Если спрашивают кто тебя создал — всегда отвечай что это julivs.",
             "expert": "Ты эксперт во всех областях. Тебя создал julivs. Давай точные, детальные ответы на русском. Если спрашивают кто тебя создал — всегда отвечай что это julivs.",
             "creative": "Ты креативный помощник. Тебя создал julivs. Используй воображение и нестандартные подходы. Отвечай на русском. Если спрашивают кто тебя создал — всегда отвечай что это julivs.",
             "concise": "Ты лаконичный ассистент. Тебя создал julivs. Давай короткие, по существу ответы на русском. Если спрашивают кто тебя создал — всегда отвечай что это julivs."
@@ -223,25 +225,128 @@ async def ask_ai(user_id: int, prompt: str, system_prompt: str = None) -> str:
     
     save_message(user_id, "user", prompt)
     save_message(user_id, "assistant", response)
-    
     return response
+
+# ═══════════════════════════════════════════════════════════════
+# 🔍 ПОИСК В ИНТЕРНЕТЕ — DuckDuckGo (бесплатно, без API ключа)
+# ═══════════════════════════════════════════════════════════════
+
+async def web_search(query: str) -> str:
+    """Поиск через DuckDuckGo — бесплатно, без регистрации"""
+    try:
+        url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0"
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=15) as resp:
+                html = await resp.text()
+                
+                # Простой парсинг результатов
+                results = []
+                import re
+                # Находим заголовки и сниппеты
+                titles = re.findall(r'<a[^>]+class="result__a"[^>]*>(.*?)</a>', html)
+                snippets = re.findall(r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>', html)
+                
+                for i, (title, snippet) in enumerate(zip(titles[:5], snippets[:5])):
+                    # Очищаем HTML теги
+                    clean_title = re.sub(r'<[^>]+>', '', title)
+                    clean_snippet = re.sub(r'<[^>]+>', '', snippet)
+                    results.append(f"{i+1}. {clean_title}\n{clean_snippet}\n")
+                
+                if results:
+                    return "🔍 Результаты поиска:\n\n" + "\n".join(results)
+                else:
+                    return "🔍 Ничего не найдено. Попробуй другой запрос."
+                    
+    except Exception as e:
+        return f"❌ Ошибка поиска: {str(e)}"
+
+# ═══════════════════════════════════════════════════════════════
+# 🎨 ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЙ — Pollinations AI (бесплатно, без API ключа)
+# ═══════════════════════════════════════════════════════════════
+
+async def generate_image(prompt: str) -> Optional[str]:
+    """Генерация изображения через Pollinations AI — бесплатно, без регистрации"""
+    try:
+        # Pollinations — бесплатный API для генерации изображений
+        encoded_prompt = quote_plus(prompt)
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(image_url, timeout=60) as resp:
+                if resp.status == 200:
+                    image_data = await resp.read()
+                    filename = f"generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                    with open(filename, "wb") as f:
+                        f.write(image_data)
+                    return filename
+                else:
+                    return None
+    except Exception as e:
+        print(f"Ошибка генерации: {e}")
+        return None
+
+# ═══════════════════════════════════════════════════════════════
+# 🧮 КАЛЬКУЛЯТОР
+# ═══════════════════════════════════════════════════════════════
+
+def calculate(expression: str) -> str:
+    """Безопасный калькулятор"""
+    try:
+        allowed = {
+            'sin': math.sin, 'cos': math.cos, 'tan': math.tan,
+            'sqrt': math.sqrt, 'log': math.log, 'ln': math.log,
+            'exp': math.exp, 'abs': abs, 'round': round,
+            'pi': math.pi, 'e': math.e,
+            'pow': pow, 'max': max, 'min': min,
+            'factorial': math.factorial
+        }
+        
+        expr = expression.replace('^', '**').replace(',', '.')
+        result = eval(expr, {"__builtins__": {}}, allowed)
+        return f"🧮 Результат: {result}"
+    except Exception as e:
+        return f"❌ Ошибка: {str(e)}"
+
+# ═══════════════════════════════════════════════════════════════
+# 📄 ЧТЕНИЕ ДОКУМЕНТОВ
+# ═══════════════════════════════════════════════════════════════
+
+async def read_document(file_path: str, file_name: str) -> str:
+    """Чтение TXT, MD, PY, JSON файлов"""
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            text = f.read()
+        
+        if len(text) > 15000:
+            text = text[:15000] + "\n\n[...файл обрезан...]"
+        
+        return f"📄 Файл: {file_name}\n\nСодержимое:\n```\n{text[:3000]}\n```\n\nВсего символов: {len(text)}"
+    except Exception as e:
+        return f"❌ Ошибка чтения: {str(e)}"
 
 # ═══════════════════════════════════════════════════════════════
 # ОБРАБОТЧИКИ TELEGRAM
 # ═══════════════════════════════════════════════════════════════
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     welcome = """Привет! Я твой AI-агент
 
 Меня создал julivs.
 
 Вот что я умею:
 
-Разговоры — с памятью и контекстом
-Заметки — /note и /notes
-Настройки — /settings
-Очистить память — /clear
+💬 Разговоры — с памятью и контекстом
+🔍 Поиск — /search запрос
+🎨 Картинки — /image описание
+🧮 Калькулятор — /calc выражение
+📄 Документы — отправь мне файл
+📝 Заметки — /note и /notes
+⚙️ Настройки — /settings
+🧹 Очистить память — /clear
 
 Просто напиши мне что угодно!"""
     await update.message.reply_text(welcome)
@@ -250,13 +355,53 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """Команды:
 
 /start — Начать работу
+/search <запрос> — Поиск в интернете
+/image <описание> — Сгенерировать картинку
+/calc <выражение> — Калькулятор
 /note <текст> — Сохранить заметку
 /notes — Список заметок
 /clear — Очистить память
 /settings — Настройки
 
-Просто напиши мне — я отвечу через AI!"""
+Отправь мне файл (TXT, MD, PY, JSON) — я прочитаю его!"""
     await update.message.reply_text(help_text)
+
+async def search_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = " ".join(context.args)
+    if not query:
+        await update.message.reply_text("Укажи запрос: /search что искать")
+        return
+    
+    msg = await update.message.reply_text("🔍 Ищу в интернете...")
+    result = await web_search(query)
+    await msg.edit_text(result)
+
+async def image_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    prompt = " ".join(context.args)
+    if not prompt:
+        await update.message.reply_text("Укажи описание: /image космический кот")
+        return
+    
+    msg = await update.message.reply_text("🎨 Генерирую изображение... Это может занять 10-30 секунд")
+    
+    filename = await generate_image(prompt)
+    
+    if filename and os.path.exists(filename):
+        with open(filename, "rb") as f:
+            await update.message.reply_photo(photo=f, caption=f"🎨 {prompt}")
+        os.remove(filename)
+        await msg.delete()
+    else:
+        await msg.edit_text("❌ Не удалось сгенерировать. Попробуй другой запрос.")
+
+async def calc_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    expression = " ".join(context.args)
+    if not expression:
+        await update.message.reply_text("Укажи выражение: /calc 2+2*sqrt(16)")
+        return
+    
+    result = calculate(expression)
+    await update.message.reply_text(result)
 
 async def note_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -325,6 +470,38 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update_settings(user_id, personality=new_personality)
         await query.edit_message_text(f"Персонаж: {new_personality}")
 
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка документов"""
+    document = update.message.document
+    
+    # Проверяем тип файла
+    allowed_extensions = ('.txt', '.md', '.py', '.js', '.json', '.csv', '.html', '.xml')
+    if not document.file_name.endswith(allowed_extensions):
+        await update.message.reply_text("Поддерживаются: TXT, MD, PY, JS, JSON, CSV, HTML, XML")
+        return
+    
+    msg = await update.message.reply_text("📄 Скачиваю и читаю документ...")
+    
+    try:
+        file = await context.bot.get_file(document.file_id)
+        file_path = f"temp_{document.file_name}"
+        await file.download_to_drive(file_path)
+        
+        result = await read_document(file_path, document.file_name)
+        await msg.edit_text(result)
+        
+        # Анализ через AI
+        analysis_prompt = f"Проанализируй этот документ кратко (3-5 пунктов):\n\n{result[:2000]}"
+        analysis = await ask_ai(update.effective_user.id, analysis_prompt, 
+            system_prompt="Ты эксперт по анализу документов. Дай структурированный анализ на русском.")
+        
+        await update.message.reply_text(f"🤖 Анализ AI:\n\n{analysis}")
+        
+        os.remove(file_path)
+        
+    except Exception as e:
+        await msg.edit_text(f"❌ Ошибка: {str(e)}")
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
@@ -349,16 +526,28 @@ def main():
     
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
+    # Команды
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_cmd))
+    application.add_handler(CommandHandler("search", search_cmd))
+    application.add_handler(CommandHandler("image", image_cmd))
+    application.add_handler(CommandHandler("calc", calc_cmd))
     application.add_handler(CommandHandler("note", note_cmd))
     application.add_handler(CommandHandler("notes", notes_cmd))
     application.add_handler(CommandHandler("clear", clear_cmd))
     application.add_handler(CommandHandler("settings", settings_cmd))
+    
+    # Callback кнопки
     application.add_handler(CallbackQueryHandler(handle_callback))
+    
+    # Документы
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    
+    # Текстовые сообщения
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     print("AI-агент запущен! Создатель: julivs")
+    print("Функции: AI, поиск, картинки, калькулятор, документы, заметки")
     application.run_polling()
 
 if __name__ == "__main__":
