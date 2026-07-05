@@ -228,50 +228,90 @@ async def ask_ai(user_id: int, prompt: str, system_prompt: str = None) -> str:
     return response
 
 # ═══════════════════════════════════════════════════════════════
-# 🔍 ПОИСК В ИНТЕРНЕТЕ — DuckDuckGo (бесплатно, без API ключа)
+# 🔍 ПОИСК — SearX + Wikipedia fallback
 # ═══════════════════════════════════════════════════════════════
 
 async def web_search(query: str) -> str:
-    """Поиск через DuckDuckGo — бесплатно, без регистрации"""
+    """Поиск через SearX (открытый метапоисковик) — бесплатно, без API"""
     try:
-        url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+        searx_instances = [
+            "https://search.sapti.me",
+            "https://search.bus-hit.me",
+            "https://search.projectsegfault.com",
+            "https://searx.be",
+            "https://searx.tiekoetter.com",
+        ]
+        
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.0"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=15) as resp:
-                html = await resp.text()
+        for instance in searx_instances:
+            try:
+                url = f"{instance}/search?q={quote_plus(query)}&format=json"
                 
-                # Простой парсинг результатов
-                results = []
-                import re
-                # Находим заголовки и сниппеты
-                titles = re.findall(r'<a[^>]+class="result__a"[^>]*>(.*?)</a>', html)
-                snippets = re.findall(r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>', html)
-                
-                for i, (title, snippet) in enumerate(zip(titles[:5], snippets[:5])):
-                    # Очищаем HTML теги
-                    clean_title = re.sub(r'<[^>]+>', '', title)
-                    clean_snippet = re.sub(r'<[^>]+>', '', snippet)
-                    results.append(f"{i+1}. {clean_title}\n{clean_snippet}\n")
-                
-                if results:
-                    return "🔍 Результаты поиска:\n\n" + "\n".join(results)
-                else:
-                    return "🔍 Ничего не найдено. Попробуй другой запрос."
-                    
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, headers=headers, timeout=10) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            results = data.get("results", [])
+                            
+                            if results:
+                                output = f"🔍 Результаты поиска:\n\n"
+                                for i, r in enumerate(results[:5], 1):
+                                    title = r.get("title", "Без названия")
+                                    content = r.get("content", "Нет описания")[:150]
+                                    link = r.get("url", "")
+                                    output += f"{i}. {title}\n{content}...\n{link}\n\n"
+                                return output
+                            
+            except Exception:
+                continue
+        
+        # Если SearX не сработал — пробуем Wikipedia
+        return await wikipedia_search(query)
+        
     except Exception as e:
         return f"❌ Ошибка поиска: {str(e)}"
 
+
+async def wikipedia_search(query: str) -> str:
+    """Запасной поиск через Wikipedia API"""
+    try:
+        # Пробуем русскую Wikipedia
+        url = f"https://ru.wikipedia.org/api/rest_v1/page/summary/{quote_plus(query)}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    title = data.get("title", "")
+                    extract = data.get("extract", "Нет информации")
+                    return f"📚 Wikipedia: {title}\n\n{extract[:1000]}"
+        
+        # Если не нашли на русском — пробуем английскую
+        url_en = f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote_plus(query)}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url_en, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    title = data.get("title", "")
+                    extract = data.get("extract", "No information")
+                    return f"📚 Wikipedia (EN): {title}\n\n{extract[:1000]}"
+                else:
+                    return "🔍 Ничего не найдено. Попробуй уточнить запрос."
+                    
+    except Exception as e:
+        return f"❌ Ошибка: {str(e)}"
+
 # ═══════════════════════════════════════════════════════════════
-# 🎨 ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЙ — Pollinations AI (бесплатно, без API ключа)
+# 🎨 ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЙ
 # ═══════════════════════════════════════════════════════════════
 
 async def generate_image(prompt: str) -> Optional[str]:
-    """Генерация изображения через Pollinations AI — бесплатно, без регистрации"""
+    """Генерация изображения через Pollinations AI — бесплатно"""
     try:
-        # Pollinations — бесплатный API для генерации изображений
         encoded_prompt = quote_plus(prompt)
         image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
         
@@ -471,10 +511,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"Персонаж: {new_personality}")
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка документов"""
     document = update.message.document
     
-    # Проверяем тип файла
     allowed_extensions = ('.txt', '.md', '.py', '.js', '.json', '.csv', '.html', '.xml')
     if not document.file_name.endswith(allowed_extensions):
         await update.message.reply_text("Поддерживаются: TXT, MD, PY, JS, JSON, CSV, HTML, XML")
@@ -490,7 +528,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = await read_document(file_path, document.file_name)
         await msg.edit_text(result)
         
-        # Анализ через AI
         analysis_prompt = f"Проанализируй этот документ кратко (3-5 пунктов):\n\n{result[:2000]}"
         analysis = await ask_ai(update.effective_user.id, analysis_prompt, 
             system_prompt="Ты эксперт по анализу документов. Дай структурированный анализ на русском.")
@@ -526,7 +563,6 @@ def main():
     
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
-    # Команды
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_cmd))
     application.add_handler(CommandHandler("search", search_cmd))
@@ -537,17 +573,12 @@ def main():
     application.add_handler(CommandHandler("clear", clear_cmd))
     application.add_handler(CommandHandler("settings", settings_cmd))
     
-    # Callback кнопки
     application.add_handler(CallbackQueryHandler(handle_callback))
-    
-    # Документы
     application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    
-    # Текстовые сообщения
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     print("AI-агент запущен! Создатель: julivs")
-    print("Функции: AI, поиск, картинки, калькулятор, документы, заметки")
+    print("Функции: AI, поиск (SearX+Wiki), картинки, калькулятор, документы, заметки")
     application.run_polling()
 
 if __name__ == "__main__":
