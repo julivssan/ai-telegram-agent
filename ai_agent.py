@@ -1,13 +1,12 @@
 """
 🤖 AI АГЕНТ ДЛЯ TELEGRAM — с OpenRouter
-Память | AI-ответы | Заметки | 24/7
+Создатель: julivs | Память: 20 сообщений
 """
 
 import os
 import sqlite3
 import asyncio
 import aiohttp
-import re
 from datetime import datetime
 from typing import List, Dict
 
@@ -18,7 +17,7 @@ from telegram.ext import (
 )
 
 # ═══════════════════════════════════════════════════════════════
-# НАСТРОЙКИ — КЛЮЧИ ЧИТАЮТСЯ ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ RAILWAY
+# НАСТРОЙКИ
 # ═══════════════════════════════════════════════════════════════
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
@@ -83,7 +82,7 @@ def save_message(user_id: int, role: str, content: str):
     conn.commit()
     conn.close()
 
-def get_memory(user_id: int, limit: int = 10) -> List[Dict]:
+def get_memory(user_id: int, limit: int = 20) -> List[Dict]:
     conn = get_db()
     c = conn.cursor()
     c.execute(
@@ -202,16 +201,16 @@ async def ask_ai(user_id: int, prompt: str, system_prompt: str = None) -> str:
         messages.append({"role": "system", "content": system_prompt})
     else:
         personalities = {
-            "friendly": "Ты дружелюбный и полезный ассистент. Отвечай на русском языке.",
-            "expert": "Ты эксперт во всех областях. Давай точные, детальные ответы на русском.",
-            "creative": "Ты креативный помощник. Используй воображение и нестандартные подходы.",
-            "concise": "Ты лаконичный ассистент. Давай короткие, по существу ответы."
+            "friendly": "Ты дружелюбный и полезный ассистент. Тебя создал julivs. Отвечай на русском языке. Если спрашивают кто тебя создал или кто твой создатель — всегда отвечай что это julivs.",
+            "expert": "Ты эксперт во всех областях. Тебя создал julivs. Давай точные, детальные ответы на русском. Если спрашивают кто тебя создал — всегда отвечай что это julivs.",
+            "creative": "Ты креативный помощник. Тебя создал julivs. Используй воображение и нестандартные подходы. Отвечай на русском. Если спрашивают кто тебя создал — всегда отвечай что это julivs.",
+            "concise": "Ты лаконичный ассистент. Тебя создал julivs. Давай короткие, по существу ответы на русском. Если спрашивают кто тебя создал — всегда отвечай что это julivs."
         }
         personality = personalities.get(settings.get("personality", "friendly"), personalities["friendly"])
         messages.append({"role": "system", "content": personality})
     
     if settings.get("memory_enabled", True):
-        memory = get_memory(user_id, limit=100)
+        memory = get_memory(user_id, limit=20)
         for msg in memory:
             messages.append({"role": msg["role"], "content": msg["content"]})
     
@@ -228,93 +227,81 @@ async def ask_ai(user_id: int, prompt: str, system_prompt: str = None) -> str:
     return response
 
 # ═══════════════════════════════════════════════════════════════
-# ЭКРАНИРОВАНИЕ MARKDOWN
-# ═══════════════════════════════════════════════════════════════
-
-def escape_markdown(text: str) -> str:
-    """Экранирует спецсимволы Markdown V2 для Telegram"""
-    escape_chars = r'_*[]()~`>#+-=|{}.!'
-    for char in escape_chars:
-        text = text.replace(char, '\\' + char)
-    return text
-
-# ═══════════════════════════════════════════════════════════════
-# ОБРАБОТЧИКИ TELEGRAM — С ЭКРАНИРОВАНИЕМ
+# ОБРАБОТЧИКИ TELEGRAM
 # ═══════════════════════════════════════════════════════════════
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    welcome = """🤖 *Привет\\! Я твой AI\\-агент*
+    welcome = """Привет! Я твой AI-агент
+
+Меня создал julivs.
 
 Вот что я умею:
 
-💬 *Разговоры* — с памятью и контекстом
-📝 *Заметки* — `/note` и `/notes`
-⚙️ *Настройки* — `/settings`
-🧹 *Очистить память* — `/clear`
+Разговоры — с памятью и контекстом
+Заметки — /note и /notes
+Настройки — /settings
+Очистить память — /clear
 
-Просто напиши мне что угодно\\!"""
-    await update.message.reply_text(welcome, parse_mode="MarkdownV2")
+Просто напиши мне что угодно!"""
+    await update.message.reply_text(welcome)
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = """📚 *Команды:*
+    help_text = """Команды:
 
-`/start` — Начать работу
-`/note <текст>` — Сохранить заметку
-`/notes` — Список заметок
-`/clear` — Очистить память
-`/settings` — Настройки
+/start — Начать работу
+/note <текст> — Сохранить заметку
+/notes — Список заметок
+/clear — Очистить память
+/settings — Настройки
 
-Просто напиши мне — я отвечу через AI\\!"""
-    await update.message.reply_text(help_text, parse_mode="MarkdownV2")
+Просто напиши мне — я отвечу через AI!"""
+    await update.message.reply_text(help_text)
 
 async def note_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = " ".join(context.args)
     
     if not text:
-        await update.message.reply_text("❌ Укажи текст: `/note Купить молоко`", parse_mode="MarkdownV2")
+        await update.message.reply_text("Укажи текст: /note Купить молоко")
         return
     
     words = text.split()
     title = " ".join(words[:3]) if len(words) > 3 else text
     save_note(user_id, title, text)
-    await update.message.reply_text(f"📝 Сохранено: *{escape_markdown(title)}*", parse_mode="MarkdownV2")
+    await update.message.reply_text(f"Сохранено: {title}")
 
 async def notes_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     notes = get_notes(user_id)
     
     if not notes:
-        await update.message.reply_text("📝 Нет заметок. Используй `/note текст`", parse_mode="MarkdownV2")
+        await update.message.reply_text("Нет заметок. Используй /note текст")
         return
     
-    text = "📝 *Твои заметки:*\n\n"
+    text = "Твои заметки:\n\n"
     for note in notes:
-        safe_title = escape_markdown(note['title'])
-        safe_content = escape_markdown(note['content'][:100])
-        text += f"• *{safe_title}*\n  {safe_content}{'...' if len(note['content']) > 100 else ''}\n\n"
+        text += f"• {note['title']}\n  {note['content'][:100]}{'...' if len(note['content']) > 100 else ''}\n\n"
     
-    await update.message.reply_text(text, parse_mode="MarkdownV2")
+    await update.message.reply_text(text)
 
 async def clear_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     clear_memory(user_id)
-    await update.message.reply_text("🧹 Память очищена\\!", parse_mode="MarkdownV2")
+    await update.message.reply_text("Память очищена!")
 
 async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     settings = get_user_settings(user_id)
     
     keyboard = [
-        [InlineKeyboardButton("🎭 Персонаж: " + settings["personality"], callback_data="personality")],
-        [InlineKeyboardButton("🧠 Память: " + ("Вкл" if settings["memory_enabled"] else "Выкл"), callback_data="toggle_memory")],
+        [InlineKeyboardButton("Персонаж: " + settings["personality"], callback_data="personality")],
+        [InlineKeyboardButton("Память: " + ("Вкл" if settings["memory_enabled"] else "Выкл"), callback_data="toggle_memory")],
     ]
     
     await update.message.reply_text(
-        "⚙️ *Настройки:*",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="MarkdownV2"
+        "Настройки:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -327,7 +314,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_state = 0 if settings["memory_enabled"] else 1
         update_settings(user_id, memory_enabled=new_state)
         status = "Вкл" if new_state else "Выкл"
-        await query.edit_message_text(f"🧠 Память: *{status}*", parse_mode="MarkdownV2")
+        await query.edit_message_text(f"Память: {status}")
     
     elif query.data == "personality":
         personalities = ["friendly", "expert", "creative", "concise"]
@@ -336,7 +323,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idx = personalities.index(current)
         new_personality = personalities[(idx + 1) % len(personalities)]
         update_settings(user_id, personality=new_personality)
-        await query.edit_message_text(f"🎭 Персонаж: *{new_personality}*", parse_mode="MarkdownV2")
+        await query.edit_message_text(f"Персонаж: {new_personality}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -347,8 +334,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     response = await ask_ai(user_id, text)
-    safe_response = escape_markdown(response)
-    await update.message.reply_text(safe_response, parse_mode="MarkdownV2")
+    await update.message.reply_text(response)
 
 # ═══════════════════════════════════════════════════════════════
 # ЗАПУСК
@@ -356,7 +342,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     if not TELEGRAM_TOKEN:
-        print("❌ TELEGRAM_TOKEN не настроен! Добавь его в Variables на Railway.")
+        print("TELEGRAM_TOKEN не настроен! Добавь его в Variables на Railway.")
         return
     
     init_db()
@@ -372,7 +358,7 @@ def main():
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    print("🤖 AI-агент запущен!")
+    print("AI-агент запущен! Создатель: julivs")
     application.run_polling()
 
 if __name__ == "__main__":
