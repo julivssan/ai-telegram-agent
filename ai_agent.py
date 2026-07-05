@@ -174,7 +174,7 @@ async def ask_openrouter(messages: List[Dict], temperature: float = 0.7) -> str:
         "X-Title": "AI Telegram Agent"
     }
     payload = {
-        "model": "meta-llama/llama-3.1-8b-instruct:free",
+        "model": "mistralai/mistral-7b-instruct:free",
         "messages": messages,
         "temperature": temperature,
         "max_tokens": 2048
