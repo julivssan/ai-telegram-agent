@@ -211,7 +211,7 @@ async def ask_ai(user_id: int, prompt: str, system_prompt: str = None) -> str:
         messages.append({"role": "system", "content": personality})
     
     if settings.get("memory_enabled", True):
-        memory = get_memory(user_id, limit=8)
+        memory = get_memory(user_id, limit=100)
         for msg in memory:
             messages.append({"role": msg["role"], "content": msg["content"]})
     
